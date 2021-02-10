@@ -30,7 +30,7 @@ import viper.carbon.boogie.Assert
 import viper.carbon.boogie.ConstDecl
 import viper.carbon.boogie.Const
 import viper.carbon.boogie.LocalVar
-import viper.silver.ast.{LocationAccess, PermMul, PredicateAccess, PredicateAccessPredicate, ResourceAccess, WildcardPerm}
+import viper.silver.ast.{LocationAccess, PermMul, PredicateAccess, PredicateAccessPredicate, ResourceAccess, WildcardPerm, SWildcardPerm}
 import viper.carbon.boogie.Forall
 import viper.carbon.boogie.Assign
 import viper.carbon.boogie.Func
@@ -310,8 +310,9 @@ class QuantifiedPermModule(val verifier: Verifier)
         val p = PermissionSplitter.normalizePerm(prm)
         val perms = PermissionSplitter.splitPerm(p) filter (x => x._1 - 1 == exhaleModule.currentPhaseId)
         (if (exhaleModule.currentPhaseId == 0)
-          (if (!p.isInstanceOf[sil.WildcardPerm])
-            Assert(permissionPositiveInternal(translatePerm(p), Some(p), true), error.dueTo(reasons.NegativePermission(p))) else Nil: Stmt) ++ Nil // check amount is non-negative
+          (if (!p.isInstanceOf[sil.WildcardPerm] && !p.isInstanceOf[sil.SWildcardPerm])
+            Assert(permissionPositiveInternal(translatePerm(p), Some(p), true), error.dueTo(reasons.NegativePermission(p)))
+          else Nil: Stmt) ++ Nil // check amount is non-negative
         else Nil) ++
           (if (perms.size == 0) {
             Nil
@@ -324,6 +325,9 @@ class QuantifiedPermModule(val verifier: Verifier)
                 val (permVal, wildcard, stmts): (Exp, Exp, Stmt) =
                   if (perm.isInstanceOf[sil.WildcardPerm]) {
                     val w = LocalVar(Identifier("wildcard"), Real)
+                    (w, w, LocalVarWhereDecl(w.name, w > noPerm) :: Havoc(w) :: Nil)
+                  } else if (perm.isInstanceOf[sil.SWildcardPerm]) {
+                    val w = LocalVar(Identifier("sWildcard"), Real)
                     (w, w, LocalVarWhereDecl(w.name, w > noPerm) :: Havoc(w) :: Nil)
                   } else {
                     onlyWildcard = false
@@ -800,6 +804,9 @@ class QuantifiedPermModule(val verifier: Verifier)
           if (perm.isInstanceOf[WildcardPerm]) {
             val w = LocalVar(Identifier("wildcard"), Real)
             (w, LocalVarWhereDecl(w.name, w > noPerm) :: Havoc(w) :: Nil)
+          } else if (perm.isInstanceOf[SWildcardPerm]) {
+            val w = LocalVar(Identifier("sWildcard"), Real)
+            (w, LocalVarWhereDecl(w.name, w > noPerm) :: Havoc(w) :: Nil)
           } else {
             (translatePerm(perm), Nil)
           }
@@ -1248,6 +1255,8 @@ class QuantifiedPermModule(val verifier: Verifier)
         fullPerm
       case sil.WildcardPerm() =>
         sys.error("cannot translate wildcard at an arbitrary position (should only occur directly in an accessibility predicate)")
+      case sil.SWildcardPerm() =>
+        sys.error((e isSubtype sil.Perm)+"cannot translate wildcard at an arbitrary position (should only occur directly in an accessibility predicate)")
       case sil.EpsilonPerm() =>
         sys.error("epsilon permissions are not supported by this permission module")
       case sil.CurrentPerm(loc: LocationAccess) =>

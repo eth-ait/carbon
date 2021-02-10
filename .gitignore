@@ -9,3 +9,5 @@ lib/
 silver
 viper_tutorial_examples
 tmp/
+test.bpl
+test.vpr
