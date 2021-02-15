@@ -73,6 +73,12 @@ class QuantifiedPermModule(val verifier: Verifier)
 
   implicit val namespace = verifier.freshNamespace("perm")
   private val axiomNamespace = verifier.freshNamespace("perm.axiom")
+  private val pairTypeName = "Pair"
+  private val pairConstructName = Identifier("pair")
+  private val fstConstructName = Identifier("fst")
+  private val sndConstructName = Identifier("snd")
+  def pairType = NamedType(pairTypeName, Seq(TypeVar("A"), TypeVar("B")))
+  def pairTypeOfPerm = NamedType(pairTypeName, Seq(Real, Bool))
   private val permTypeName = "Perm"
   private val maskTypeName = "MaskType"
   private val maskType = NamedType(maskTypeName)
@@ -104,6 +110,9 @@ class QuantifiedPermModule(val verifier: Verifier)
   private val resultMask = LocalVarDecl(Identifier("ResultMask"),maskType)
   private val summandMask1 = LocalVarDecl(Identifier("SummandMask1"),maskType)
   private val summandMask2 = LocalVarDecl(Identifier("SummandMask2"),maskType)
+
+
+  // TODO: where are these identifiers needed
   private val sumMasks = Identifier("sumMask")
   private val tempMask = LocalVar(Identifier("TempMask"),maskType)
 
@@ -124,39 +133,82 @@ class QuantifiedPermModule(val verifier: Verifier)
     val field = LocalVarDecl(Identifier("f")(axiomNamespace), fieldType)
     val permInZeroMask = MapSelect(zeroMask, Seq(obj.l, field.l))
     val permInZeroPMask = MapSelect(zeroPMask, Seq(obj.l, field.l))
+    val ident_a = LocalVarDecl(Identifier("a")(axiomNamespace), TypeVar("A")) 
+    val ident_b = LocalVarDecl(Identifier("b")(axiomNamespace), TypeVar("B"))
+    val ident_p = LocalVarDecl(Identifier("p")(axiomNamespace), pairType)
+    val y = FuncApp(pairConstructName, Seq(ident_a, ident_b) map (_.l), pairType)
+    val funcAppFst = FuncApp(fstConstructName, Seq(ident_p) map (_.l), TypeVar("A"))
+    val funcAppSnd = FuncApp(sndConstructName, Seq(ident_p) map (_.l), TypeVar("B"))
+    val funcAppPairSndFst = FuncApp(pairConstructName, Seq(funcAppFst, funcAppSnd), pairType)
+    val funcAppPair = FuncApp(pairConstructName, Seq(ident_a, ident_b) map (_.l), pairType)
+    
+    // Define pair
+      // type Pair A B;
+      // function pair<A, B>(a: A, b: B) : Pair A B;
+      // function fst<A, B>(p: Pair A B) : A;
+      // function snd<A, B>(p: Pair A B) : B;
+      // axiom (forall <A, B> a:A, b:B :: {pair(a,b)} fst(pair(a,b)) == a);
+      // axiom (forall <A, B> a:A, b:B :: {pair(a,b)} snd(pair(a,b)) == b);
+      // axiom (forall <A, B> p: Pair A B :: {fst(p)}{snd(p)} pair(fst(p), snd(p)) == p)
+    //TypeAlias(permType, ) ::
+    
     // permission type
-    TypeAlias(permType, Real) ::
+      //TypeAlias(permType, Real) ::
       // mask and mask type
-      TypeAlias(maskType, MapType(Seq(refType, fieldType), permType, fieldType.freeTypeVars)) ::
-      GlobalVarDecl(maskName, maskType) ::
+      TypeDecl(pairType) ++ 
+      Func(pairConstructName, 
+        Seq(LocalVarDecl(Identifier("a"), TypeVar("A")), LocalVarDecl(Identifier("b"), TypeVar("B"))), 
+        pairType) ++
+      Func(fstConstructName, 
+        Seq(LocalVarDecl(Identifier("p"), pairType)), 
+        TypeVar("A")) ++
+      Func(sndConstructName, 
+        Seq(LocalVarDecl(Identifier("p"), pairType)), 
+        TypeVar("B")) ++
+      Axiom(Forall(Seq(LocalVarDecl(Identifier("a")(axiomNamespace), TypeVar("A")), LocalVarDecl(Identifier("b")(axiomNamespace), TypeVar("B"))),
+        Trigger(funcAppPair),
+        ( funcAppFst === LocalVar(Identifier("a")(axiomNamespace), TypeVar("A"))))
+      ) ++
+      Axiom(Forall(Seq(LocalVarDecl(Identifier("a")(axiomNamespace), TypeVar("A")), LocalVarDecl(Identifier("b")(axiomNamespace), TypeVar("B"))),
+        Trigger(funcAppPair),
+        ( funcAppSnd === LocalVar(Identifier("b")(axiomNamespace), TypeVar("B"))))
+       ) ++
+      Axiom(Forall(Seq(LocalVarDecl(Identifier("p")(axiomNamespace), pairType)),
+        Trigger(Seq(funcAppFst, funcAppSnd)),
+        (  funcAppPairSndFst === LocalVar(Identifier("p")(axiomNamespace), pairType)))
+       ) ++
+      TypeAlias(permType, pairTypeOfPerm) ++
+      TypeAlias(maskType, MapType(Seq(refType, fieldType), permType, fieldType.freeTypeVars)) ++
+      GlobalVarDecl(maskName, maskType) ++
       // zero mask
-      ConstDecl(zeroMaskName, maskType) ::
+      ConstDecl(zeroMaskName, maskType) ++
       Axiom(Forall(
         Seq(obj, field),
         Trigger(permInZeroMask),
-        (permInZeroMask === noPerm))) ::
+        (permInZeroMask === noPerm))) ++
       // pmask type
-      TypeAlias(pmaskType, MapType(Seq(refType, fieldType), Bool, fieldType.freeTypeVars)) ::
+      TypeAlias(pmaskType, MapType(Seq(refType, fieldType), Bool, fieldType.freeTypeVars)) ++
       // zero pmask
-      ConstDecl(zeroPMaskName, pmaskType) ::
+      ConstDecl(zeroPMaskName, pmaskType) ++
       Axiom(Forall(
         Seq(obj, field),
         Trigger(permInZeroPMask),
-        permInZeroPMask === FalseLit())) ::
+        permInZeroPMask === FalseLit())) ++
       // predicate mask function
       Func(predicateMaskFieldName,
         Seq(LocalVarDecl(Identifier("f"), predicateVersionFieldType())),
-        predicateMaskFieldType) ::
+        predicateMaskFieldType) ++
       Func(wandMaskFieldName,
         Seq(LocalVarDecl(Identifier("f"), predicateVersionFieldType())),
-        predicateMaskFieldType) ::
+        predicateMaskFieldType) ++
       // permission amount constants
-      ConstDecl(noPermName, permType) ::
-      Axiom(noPerm === RealLit(0)) ::
-      ConstDecl(fullPermName, permType) ::
-      Axiom(fullPerm === RealLit(1)) ::
+      ConstDecl(noPermName, permType) ++
+      Axiom(noPerm === RealLit(0)) ++
+      ConstDecl(fullPermName, permType) ++
+      Axiom(fullPerm === RealLit(1)) ++
       // permission constructor
-      Func(permConstructName, Seq(LocalVarDecl(Identifier("a"), Real), LocalVarDecl(Identifier("b"), Real)), permType) :: Nil ++
+      Func(permConstructName, Seq(LocalVarDecl(Identifier("a"), TypeVar("A")), LocalVarDecl(Identifier("b"), TypeVar("B"))), permType) ++ 
+      Nil ++
       // good mask
       Func(goodMaskName, LocalVarDecl(maskName, maskType), Bool) ++
       Axiom(Forall(stateModule.staticStateContributions(),
@@ -170,7 +222,7 @@ class QuantifiedPermModule(val verifier: Verifier)
           // permissions for fields which aren't predicates are smaller than 1
           // permissions for fields which aren't predicates or wands are smaller than 1
           ((staticGoodMask && heapModule.isPredicateField(field.l).not && heapModule.isWandField(field.l).not) ==> perm <= fullPerm )))
-      ))    } ++ {
+      ))    } ++  {
       val obj = LocalVarDecl(Identifier("o")(axiomNamespace), refType)
       val field = LocalVarDecl(Identifier("f")(axiomNamespace), fieldType)
       val args = staticMask ++ Seq(obj, field)
