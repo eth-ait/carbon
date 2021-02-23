@@ -1,0 +1,8 @@
+field f: Int 
+
+method test(x: Ref)
+requires acc(x.f, sWildcard)
+ensures acc(x.f, sWildcard)
+{
+    var v: Int := x.f
+}

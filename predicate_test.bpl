@@ -1,7 +1,7 @@
 // 
 // Translation of Viper program.
 // 
-// Date:         2021-02-10 09:58:52
+// Date:         2021-02-16 14:16:37
 // Tool:         carbon 1.0
 // Arguments: :  --z3Exe /usr/bin/z3 --boogieExe /bin/boogie/Binaries/boogie --print test.bpl test.vpr
 // Dependencies:
@@ -13,11 +13,7 @@
 // Preamble of State module.
 // ==================================================
 
-// Change
-// Before -> function state(Heap: HeapType, Mask: MaskType): bool;
-// Afterwards
-
-  function state(Heap: HeapType, Mask: MaskType): bool;
+function state(Heap: HeapType, Mask: MaskType): bool;
 
 // ==================================================
 // Preamble of Heap module.
@@ -102,20 +98,21 @@ axiom (forall Heap0: HeapType, Heap1: HeapType, Heap2: HeapType ::
 // ==================================================
 
 type Pair A B;
-function pair<A, B>(a: A, b: B) : Pair A B;
-function fst<A, B>(p: Pair A B) : A;
-function snd<A, B>(p: Pair A B) : B;
-function pairGreaterEqual<A, B>(p1: Pair A B, p2: Pair A B) : bool;
-axiom (forall <A, B> a:A, b:B :: {pair(a,b)} fst(pair(a,b)) == a);
-axiom (forall <A, B> a:A, b:B :: {pair(a,b)} snd(pair(a,b)) == a);
-axiom (forall <A, B> p: Pair A B :: {fst(p)}{snd(p)} pair(fst(p), snd(p)) == p);
-// TODO choose triggers
-axiom (forall p1: Pair real bool, p2: Pair real bool :: 
-  {pairGreaterEqual(p1, p2)}
-  //{fst(p1), fst(p2), snd(p1), snd(p2)}
-  pairGreaterEqual(p1, p2) <==> fst(p1) >= fst(p2) && ((fst(p1) == fst(p2)) ==> (snd(p1) == snd(p2)) || snd(p1))
+function pair<A, B>(a: A, b: B): Pair A B;
+function fst<A, B>(p: (Pair A B)): A;
+function snd<A, B>(p: (Pair A B)): B;
+axiom (forall <A, B> a_1: A, b_1: B ::
+  { (pair(a_1, b_1): Pair A B) }
+  (fst((pair(a_1, b_1): Pair A B)): A) == a_1
 );
-
+axiom (forall <A, B> a_1: A, b_1: B ::
+  { (pair(a_1, b_1): Pair A B) }
+  (snd((pair(a_1, b_1): Pair A B)): B) == b_1
+);
+axiom (forall <A, B> p_1: (Pair A B) ::
+  { (fst(p_1): A) } { (snd(p_1): B) }
+  (pair((fst(p_1): A), (snd(p_1): B)): Pair A B) == p_1
+);
 type Perm = Pair real bool;
 type MaskType = <A, B> [Ref, Field A B]Perm;
 var Mask: MaskType;
@@ -133,39 +130,24 @@ axiom (forall <A, B> o_1: Ref, f_3: (Field A B) ::
 function PredicateMaskField<A>(f_4: (Field A FrameType)): Field A PMaskType;
 function WandMaskField<A>(f_4: (Field A FrameType)): Field A PMaskType;
 const NoPerm: Perm;
-axiom NoPerm == pair(0.000000000, false);
+axiom fst(NoPerm) == 0.000000000 && !snd(NoPerm);
 const FullPerm: Perm;
-axiom FullPerm == pair(1.000000000, false);
-// TODO: what does this function do?
-function Perm(a: real, b: real): Perm;
+axiom fst(FullPerm) == 1.000000000;
+function Perm<A, B>(a: A, b: B): Perm;
 function GoodMask(Mask: MaskType): bool;
 axiom (forall Heap: HeapType, Mask: MaskType ::
   { state(Heap, Mask) }
   state(Heap, Mask) ==> GoodMask(Mask)
 );
-
-// Something missing for sWildcard?
 axiom (forall <A, B> Mask: MaskType, o_1: Ref, f_3: (Field A B) ::
-  { GoodMask(Mask), Mask[o_1, f_3]}
-  GoodMask(Mask) ==> fst(Mask[o_1, f_3]) >= fst(NoPerm) 
-    && ((GoodMask(Mask) && !IsPredicateField(f_3)) && !IsWandField(f_3) ==> fst(Mask[o_1, f_3]) <= fst(FullPerm))
+  { GoodMask(Mask), Mask[o_1, f_3] }
+  (GoodMask(Mask) ==> fst(Mask[o_1, f_3]) >= fst(NoPerm)) && ((GoodMask(Mask) && !IsPredicateField(f_3)) && !IsWandField(f_3) ==> fst(Mask[o_1, f_3]) <= fst(FullPerm))
 );
-
-
-// Change 
-// Before
-// function HasDirectPerm<A, B>(Mask: MaskType, o_1: Ref, f_3: (Field A B)): bool;
-// axiom (forall <A, B> Mask: MaskType, o_1: Ref, f_3: (Field A B) ::
-//   { HasDirectPerm(Mask, o_1, f_3) }
-//   HasDirectPerm(Mask, o_1, f_3) <==> Mask[o_1, f_3] > NoPerm
-// );
-// Afterwards
 function HasDirectPerm<A, B>(Mask: MaskType, o_1: Ref, f_3: (Field A B)): bool;
 axiom (forall <A, B> Mask: MaskType, o_1: Ref, f_3: (Field A B) ::
   { HasDirectPerm(Mask, o_1, f_3) }
-  HasDirectPerm(Mask, o_1, f_3) <==> fst(Mask[o_1, f_3]) > fst(NoPerm) || (fst(Mask[o_1, f_3]) == fst(NoPerm) && snd(Mask[o_1, f_3]))
+  HasDirectPerm(Mask, o_1, f_3) <==> fst(Mask[o_1, f_3]) > fst(NoPerm)
 );
-
 function sumMask(ResultMask: MaskType, SummandMask1: MaskType, SummandMask2: MaskType): bool;
 axiom (forall <A, B> ResultMask: MaskType, SummandMask1: MaskType, SummandMask2: MaskType, o_1: Ref, f_3: (Field A B) ::
   { sumMask(ResultMask, SummandMask1, SummandMask2), ResultMask[o_1, f_3] } 
@@ -183,29 +165,28 @@ axiom (forall <A, B> ResultMask: MaskType, SummandMask1: MaskType, SummandMask2:
 type FrameType;
 const EmptyFrame: FrameType;
 function FrameFragment<T>(t: T): FrameType;
-function ConditionalFrame(p: Perm, f_5: FrameType): FrameType;
+function ConditionalFrame(p_2: Perm, f_5: FrameType): FrameType;
 function dummyFunction<T>(t: T): bool;
-function CombineFrames(a_1: FrameType, b_1: FrameType): FrameType;
+function CombineFrames(a_2: FrameType, b_2: FrameType): FrameType;
 // ==================================================
 // Definition of conditional frame fragments
 // ==================================================
 
-//Change
-axiom (forall p: Perm, f_5: FrameType ::
-  { ConditionalFrame(p, f_5) }
-  ConditionalFrame(p, f_5) == (if fst(p) > 0.000000000 then f_5 else EmptyFrame)
+axiom (forall p_2: Perm, f_5: FrameType ::
+  { ConditionalFrame(p_2, f_5) }
+  ConditionalFrame(p_2, f_5) == (if fst(p_2) > 0.000000000 || snd(p_2) then f_5 else EmptyFrame)
 );
 // Function for recording enclosure of one predicate instance in another
-function InsidePredicate<A, B>(p: (Field A FrameType), v_1: FrameType, q: (Field B FrameType), w: FrameType): bool;
+function InsidePredicate<A, B>(p_2: (Field A FrameType), v_1: FrameType, q: (Field B FrameType), w: FrameType): bool;
 // Transitivity of InsidePredicate
-axiom (forall <A, B, C> p: (Field A FrameType), v_1: FrameType, q: (Field B FrameType), w: FrameType, r: (Field C FrameType), u: FrameType ::
-  { InsidePredicate(p, v_1, q, w), InsidePredicate(q, w, r, u) }
-  InsidePredicate(p, v_1, q, w) && InsidePredicate(q, w, r, u) ==> InsidePredicate(p, v_1, r, u)
+axiom (forall <A, B, C> p_2: (Field A FrameType), v_1: FrameType, q: (Field B FrameType), w: FrameType, r: (Field C FrameType), u: FrameType ::
+  { InsidePredicate(p_2, v_1, q, w), InsidePredicate(q, w, r, u) }
+  InsidePredicate(p_2, v_1, q, w) && InsidePredicate(q, w, r, u) ==> InsidePredicate(p_2, v_1, r, u)
 );
 // Knowledge that two identical instances of the same predicate cannot be inside each other
-axiom (forall <A> p: (Field A FrameType), v_1: FrameType, w: FrameType ::
-  { InsidePredicate(p, v_1, p, w) }
-  !InsidePredicate(p, v_1, p, w)
+axiom (forall <A> p_2: (Field A FrameType), v_1: FrameType, w: FrameType ::
+  { InsidePredicate(p_2, v_1, p_2, w) }
+  !InsidePredicate(p_2, v_1, p_2, w)
 );
 
 // ==================================================
@@ -217,20 +198,49 @@ axiom !IsPredicateField(f_6);
 axiom !IsWandField(f_6);
 
 // ==================================================
+// Translation of predicate foo
+// ==================================================
+
+type PredicateType_foo;
+function foo(xs: Ref): Field PredicateType_foo FrameType;
+function foo#sm(xs: Ref): Field PredicateType_foo PMaskType;
+axiom (forall xs: Ref ::
+  { PredicateMaskField(foo(xs)) }
+  PredicateMaskField(foo(xs)) == foo#sm(xs)
+);
+axiom (forall xs: Ref ::
+  { foo(xs) }
+  IsPredicateField(foo(xs))
+);
+axiom (forall xs: Ref ::
+  { foo(xs) }
+  getPredicateId(foo(xs)) == 0
+);
+function foo#trigger<A>(Heap: HeapType, pred: (Field A FrameType)): bool;
+function foo#everUsed<A>(pred: (Field A FrameType)): bool;
+axiom (forall xs: Ref, xs2: Ref ::
+  { foo(xs), foo(xs2) }
+  foo(xs) == foo(xs2) ==> xs == xs2
+);
+axiom (forall xs: Ref, xs2: Ref ::
+  { foo#sm(xs), foo#sm(xs2) }
+  foo#sm(xs) == foo#sm(xs2) ==> xs == xs2
+);
+
+axiom (forall Heap: HeapType, xs: Ref ::
+  { foo#trigger(Heap, foo(xs)) }
+  foo#everUsed(foo(xs))
+);
+
+// ==================================================
 // Translation of method test
 // ==================================================
 
 procedure test(x: Ref) returns ()
   modifies Heap, Mask;
 {
-  // Change
-  // Before -> var sWildcard: real where sWildcard > NoPerm;
-  //var perm: Perm;
-  // Afterwards (Nothing)
-  var PostHeap: HeapType;
-  var PostMask: MaskType;
+  var perm: Perm;
   var v_2: int;
-  var ExhaleHeap: HeapType;
   
   // -- Initializing the state
     Mask := ZeroMask;
@@ -240,14 +250,7 @@ procedure test(x: Ref) returns ()
     assume Heap[x, $allocated];
   
   // -- Checked inhaling of precondition
-    // Change
-    // Before -> havoc sWildcard;
-    // perm := sWildcard;
-    // assume perm >= NoPerm;
-    // assume perm > NoPerm ==> x != null;
-    // Mask[x, f_6] := Mask[x, f_6] + perm;
-    // Afterwards
-    assume snd(Mask[x, f_6]) == true;
+    assume snd(Mask[null, foo(x)]) == true;
     assume state(Heap, Mask);
   
   // -- Initializing of old state
@@ -255,50 +258,13 @@ procedure test(x: Ref) returns ()
     // -- Initializing the old state
       assume Heap == old(Heap);
       assume Mask == old(Mask);
-  PostHeap := Heap;
-  PostMask := Mask;
-  havoc PostHeap;
-  PostMask := ZeroMask;
-  assume state(PostHeap, PostMask);
-  if (*) {
-    // Checked inhaling of postcondition to check definedness
-    // Change
-    // Before
-    // havoc sWildcard;
-    // perm := sWildcard;
-    // assume perm >= NoPerm;
-    // assume perm > NoPerm ==> x != null;
-    // PostMask[x, f_6] := PostMask[x, f_6] + perm;
-    assume state(PostHeap, PostMask);
-    assume state(PostHeap, PostMask);
-    // Afterwards
-    assume snd(PostMask[x, f_6]) == true;
-    assume state(PostHeap, PostMask);
-    assume state(PostHeap, PostMask);
-    // Stop execution
-    assume false;
-  }
   
-  // -- Translating statement: v := x.f -- test.vpr@7.5
+  // -- Translating statement: v := x.f -- test.vpr@11.5
     
     // -- Check definedness of x.f
-      assert {:msg "  Assignment might fail. There might be insufficient permission to access x.f. (test.vpr@7.5) [3]"}
+      assert {:msg "  Assignment might fail. There might be insufficient permission to access x.f. (test.vpr@11.5) [3]"}
         HasDirectPerm(Mask, x, f_6);
       assume state(Heap, Mask);
     v_2 := Heap[x, f_6];
     assume state(Heap, Mask);
-  
-  // -- Exhaling postcondition
-    // Phase 1: pure assertions and fixed permissions
-    // Change
-    // Afterwards (nothing) -> don't give back the permission
-    // perm := NoPerm;
-    // havoc sWildcard;
-    // perm := perm + sWildcard;
-    // Mask[x, f_6] := Mask[x, f_6] - perm;
-
-    // Finish exhale
-    havoc ExhaleHeap;
-    assume IdenticalOnKnownLocations(Heap, ExhaleHeap, Mask);
-    Heap := ExhaleHeap;
 }
