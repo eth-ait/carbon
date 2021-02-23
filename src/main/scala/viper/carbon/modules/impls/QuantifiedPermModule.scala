@@ -30,7 +30,7 @@ import viper.carbon.boogie.Assert
 import viper.carbon.boogie.ConstDecl
 import viper.carbon.boogie.Const
 import viper.carbon.boogie.LocalVar
-import viper.silver.ast.{LocationAccess, PermMul, PredicateAccess, PredicateAccessPredicate, ResourceAccess, WildcardPerm}
+import viper.silver.ast.{LocationAccess, PermMul, PredicateAccess, PredicateAccessPredicate, ResourceAccess, WildcardPerm, SWildcardPerm}
 import viper.carbon.boogie.Forall
 import viper.carbon.boogie.Assign
 import viper.carbon.boogie.Func
@@ -208,7 +208,7 @@ class QuantifiedPermModule(val verifier: Verifier)
     val obj = LocalVarDecl(Identifier("o")(axiomNamespace), refType)
     val field = LocalVarDecl(Identifier("f")(axiomNamespace), fieldType)
     val permInZeroMask = MapSelect(zeroMask, Seq(obj.l, field.l))
-      // type Perm = tuple real bool;
+      // type Perm = Tuple real bool;
       TypeAlias(permType, tupleTypeOfPerm) ++
       // type MaskType = <A, B> [Ref, Field A B]Perm;
       TypeAlias(maskType, MapType(Seq(refType, fieldType), permType, fieldType.freeTypeVars)) ++
@@ -268,7 +268,7 @@ class QuantifiedPermModule(val verifier: Verifier)
         Func(hasDirectPermName, args, Bool) ++
         // axiom (forall <A, B> Mask: MaskType, o_1: Ref, f_3: (Field A B) ::
         //    { HasDirectPerm(Mask, o_1, f_3) }
-        //    HasDirectPerm(Mask, o_1, f_3) <==> fst(Mask[o_1, f_3]) > fst(NoPerm)
+        //    HasDirectPerm(Mask, o_1, f_3) <==> fst(Mask[o_1, f_3]) > fst(NoPerm) && fst(Mask[o_1, f_3]) > fst(NoPerm)
         // );
         Axiom(Forall(
           staticMask ++ Seq(obj, field),
@@ -379,9 +379,9 @@ class QuantifiedPermModule(val verifier: Verifier)
 
   def staticGoodMask = FuncApp(goodMaskName, LocalVar(maskName, maskType), Bool)
 
-  private def permAdd(a: Exp, b: Exp): Exp = a + b
-  private def permSub(a: Exp, b: Exp): Exp = a - b
-  private def permDiv(a: Exp, b: Exp): Exp = a / b
+ private def permAdd(a: Exp, b: Exp): Exp = tuple(Seq(fst(a, Real) + fst(b, Real), snd(a, Bool) || snd(b, Bool)), permType)
+  private def permSub(a: Exp, b: Exp): Exp = tuple(Seq(fst(a, Real) - fst(b, Real), snd(a, Bool) || snd(b, Bool)), permType)
+  private def permDiv(a: Exp, b: Exp): Exp = tuple(Seq(fst(a, Real) / fst(b, Real), snd(a, Bool) || snd(b, Bool)), permType)
 
   override def freshTempState(name: String): Seq[Var] = {
     Seq(LocalVar(Identifier(s"${name}Mask"), maskType))
@@ -421,7 +421,7 @@ class QuantifiedPermModule(val verifier: Verifier)
       case (_, Some(sil.FullPerm())) => TrueLit()
       case (_, Some(sil.WildcardPerm())) => TrueLit()
       case (_, Some(sil.NoPerm())) => if (zeroOK) TrueLit() else FalseLit()
-      case _ => if(zeroOK) fst(permission, Real) >= fst(noPerm, Real) else fst(permission, Real) > fst(noPerm, Real)
+      case _ => if(zeroOK) permGe(permission, noPerm) else permGt(permission, noPerm)
     }
   }
 
@@ -443,8 +443,10 @@ class QuantifiedPermModule(val verifier: Verifier)
         val p = PermissionSplitter.normalizePerm(prm)
         val perms = PermissionSplitter.splitPerm(p) filter (x => x._1 - 1 == exhaleModule.currentPhaseId)
         (if (exhaleModule.currentPhaseId == 0)
-          (if (!p.isInstanceOf[sil.WildcardPerm])
-            Assert(permissionPositiveInternal(translatePerm(p), Some(p), true), error.dueTo(reasons.NegativePermission(p))) else Nil: Stmt) ++ Nil // check amount is non-negative
+          (if (!p.isInstanceOf[sil.WildcardPerm] && !p.isInstanceOf[sil.SWildcardPerm])
+            Assert(permissionPositiveInternal(translatePerm(p), Some(p), true), error.dueTo(reasons.NegativePermission(p))) 
+           else Nil: Stmt
+          ) ++ Nil // check amount is non-negative
         else Nil) ++
           (if (perms.size == 0) {
             Nil
@@ -457,7 +459,10 @@ class QuantifiedPermModule(val verifier: Verifier)
                 val (permVal, wildcard, stmts): (Exp, Exp, Stmt) =
                   if (perm.isInstanceOf[sil.WildcardPerm]) {
                     val w = LocalVar(Identifier("wildcard"), Real)
-                    (w, w, LocalVarWhereDecl(w.name, w > noPerm) :: Havoc(w) :: Nil)
+                    (w, w, LocalVarWhereDecl(w.name, permGt(w, noPerm)) :: Havoc(w) :: Nil)
+                  } else if (perm.isInstanceOf[sil.SWildcardPerm]) {
+                    val w = LocalVar(Identifier("sWildcard"), permType)
+                    (w, w, Nil)
                   } else {
                     onlyWildcard = false
                     (translatePerm(perm), null, Nil)
@@ -466,8 +471,8 @@ class QuantifiedPermModule(val verifier: Verifier)
                   stmts ++
                     (permVar := permAdd(permVar, permVal)) ++
                     (if (perm.isInstanceOf[sil.WildcardPerm]) {
-                      (Assert(curPerm > noPerm, error.dueTo(reasons.InsufficientPermission(loc))) ++
-                        Assume(wildcard < curPerm)): Stmt
+                      (Assert(permGt(curPerm, noPerm), error.dueTo(reasons.InsufficientPermission(loc))) ++
+                        Assume(permLt(wildcard, curPerm))): Stmt
                     } else {
                       Nil
                     }),
@@ -475,8 +480,8 @@ class QuantifiedPermModule(val verifier: Verifier)
               }).flatten ++
               (if (onlyWildcard) Nil else if (exhaleModule.currentPhaseId + 1 == 2) {
                 If(permVar !== noPerm,
-                  (Assert(curPerm > noPerm, error.dueTo(reasons.InsufficientPermission(loc))) ++
-                    Assume(permVar < curPerm)): Stmt, Nil)
+                  (Assert(permGt(curPerm, noPerm), error.dueTo(reasons.InsufficientPermission(loc))) ++
+                    Assume(permLt(permVar, curPerm))): Stmt, Nil)
               } else {
                 If(permVar !== noPerm,
                   Assert(permLe(permVar, curPerm), error.dueTo(reasons.InsufficientPermission(loc))), Nil)
@@ -933,6 +938,9 @@ class QuantifiedPermModule(val verifier: Verifier)
           if (perm.isInstanceOf[WildcardPerm]) {
             val w = LocalVar(Identifier("wildcard"), Real)
             (w, LocalVarWhereDecl(w.name, w > noPerm) :: Havoc(w) :: Nil)
+          } else if (perm.isInstanceOf[SWildcardPerm]) {
+            val w = LocalVar(Identifier("sWildcard"), permType)
+            (w, (LocalVar(w.name, permType) := tuple(Seq(RealLit(0), TrueLit()), permType)) :: Nil)
           } else {
             (translatePerm(perm), Nil)
           }
@@ -1379,6 +1387,8 @@ class QuantifiedPermModule(val verifier: Verifier)
         fullPerm
       case sil.WildcardPerm() =>
         sys.error("cannot translate wildcard at an arbitrary position (should only occur directly in an accessibility predicate)")
+      case sil.SWildcardPerm() =>
+        sys.error("cannot translate sWildcard at an arbitrary position (should only occur directly in an accessibility predicate)")
       case sil.EpsilonPerm() =>
         sys.error("epsilon permissions are not supported by this permission module")
       case sil.CurrentPerm(loc: LocationAccess) =>
@@ -1387,7 +1397,7 @@ class QuantifiedPermModule(val verifier: Verifier)
         //Magic wands
         sys.error("Carbon does not support magic wands in perm expressions, see Carbon issue #243")
       case sil.FractionalPerm(left, right) =>
-        BinExp(translateExp(left), Div, translateExp(right))
+        tuple(Seq(BinExp(translateExp(left), Div, translateExp(right)), FalseLit()), permType)
       case sil.PermMinus(a) =>
         UnExp(Minus,translatePerm(a))
       case sil.PermAdd(a, b) =>
@@ -1465,12 +1475,12 @@ class QuantifiedPermModule(val verifier: Verifier)
     a !== b
   }
   private def permLt(a: Exp, b: Exp): Exp = {
-    a < b
+    fst(a, Real) < fst(b, Real) || (fst(a, Real) === fst(b, Real) && snd(a, Bool) === FalseLit() && snd(b, Bool) === TrueLit())
   }
   private def permLe(a: Exp, b: Exp, forField : Boolean = false): Exp = {
     // simple optimization that helps in many cases
     if (forField && a == fullPerm) permEq(a, b)
-    else a <= b
+    else permLt(a, b) || permEq(a,b)
   }
   private def permGt(a: Exp, b: Exp, forField : Boolean = false): Exp = {
     // simple optimization that helps in many cases
